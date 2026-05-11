@@ -41,13 +41,22 @@ func main() {
 		defer pubsub.Close()
 
 		ch := pubsub.Channel()
-		for msg := range ch {
-			var tick models.Tick
-			if err := json.Unmarshal([]byte(msg.Payload), &tick); err != nil {
-				log.Printf("Error unmarshaling tick: %v", err)
-				continue
+		for {
+			select {
+			case <-ctx.Done():
+				log.Println("Redis listener shutting down...")
+				return
+			case msg, ok := <-ch:
+				if !ok {
+					return
+				}
+				var tick models.Tick
+				if err := json.Unmarshal([]byte(msg.Payload), &tick); err != nil {
+					log.Printf("Error unmarshaling tick: %v", err)
+					continue
+				}
+				h.Broadcast(tick)
 			}
-			h.Broadcast(tick)
 		}
 	}()
 
