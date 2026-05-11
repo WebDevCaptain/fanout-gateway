@@ -12,6 +12,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/shreyash/fanout-gateway/internal/hub"
 	"github.com/shreyash/fanout-gateway/internal/models"
+	"github.com/shreyash/fanout-gateway/internal/ws"
 )
 
 func main() {
@@ -74,9 +75,9 @@ func main() {
 		c.JSON(http.StatusOK, h.GetStats())
 	})
 
-	// Placeholder for WebSocket upgrade (Phase 3)
+	// WebSocket endpoint
 	r.GET("/ws", func(c *gin.Context) {
-		c.JSON(http.StatusNotImplemented, gin.H{"message": "WebSocket endpoint not yet implemented"})
+		ws.ServeWS(c, h)
 	})
 
 	port := os.Getenv("PORT")

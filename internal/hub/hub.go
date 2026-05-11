@@ -28,8 +28,13 @@ func (c *Client) ID() string {
 	return c.id
 }
 
-func (c *Client) Send() chan<- models.Tick {
+func (c *Client) Listen() <-chan models.Tick {
 	return c.send
+}
+
+// Close closes the client's send channel
+func (c *Client) Close() {
+	close(c.send)
 }
 
 // Hub maintains the set of active clients and broadcasts messages
@@ -104,6 +109,30 @@ func (h *Hub) Subscribe(clientID string, symbol string) {
 		h.subscriptions[symbol] = make(map[string]*Client)
 	}
 	h.subscriptions[symbol][clientID] = client
+}
+
+// Unsubscribe removes a symbol from a client's interests
+func (h *Hub) Unsubscribe(clientID string, symbol string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	client, ok := h.clients[clientID]
+	if !ok {
+		return
+	}
+
+	client.mu.Lock()
+	if client.symbols != nil {
+		delete(client.symbols, symbol)
+	}
+	client.mu.Unlock()
+
+	if subs, ok := h.subscriptions[symbol]; ok {
+		delete(subs, clientID)
+		if len(subs) == 0 {
+			delete(h.subscriptions, symbol)
+		}
+	}
 }
 
 // Broadcast sends a tick to all clients subscribed to its symbol
