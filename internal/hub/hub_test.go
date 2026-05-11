@@ -9,32 +9,29 @@ import (
 
 func TestHubRegisterUnregister(t *testing.T) {
 	h := NewHub()
-	client := &Client{
-		ID:   "test-client",
-		Send: make(chan models.Tick, 1),
-	}
+	client := NewClient("test-client", 1)
 
 	h.Register(client)
-	if _, ok := h.clients[client.ID]; !ok {
+	h.mu.RLock()
+	if _, ok := h.clients[client.ID()]; !ok {
 		t.Errorf("Client not registered")
 	}
+	h.mu.RUnlock()
 
-	h.Unregister(client.ID)
-	if _, ok := h.clients[client.ID]; ok {
+	h.Unregister(client.ID())
+	h.mu.RLock()
+	if _, ok := h.clients[client.ID()]; ok {
 		t.Errorf("Client not unregistered")
 	}
+	h.mu.RUnlock()
 }
 
 func TestHubBroadcast(t *testing.T) {
 	h := NewHub()
-	client := &Client{
-		ID:      "test-client",
-		Send:    make(chan models.Tick, 1),
-		Symbols: make(map[string]bool),
-	}
+	client := NewClient("test-client", 1)
 
 	h.Register(client)
-	h.Subscribe(client.ID, "AAPL")
+	h.Subscribe(client.ID(), "AAPL")
 
 	tick := models.Tick{
 		Symbol:    "AAPL",
@@ -45,7 +42,7 @@ func TestHubBroadcast(t *testing.T) {
 	h.Broadcast(tick)
 
 	select {
-	case received := <-client.Send:
+	case received := <-client.send:
 		if received.Symbol != tick.Symbol || received.Price != tick.Price {
 			t.Errorf("Received wrong tick: %+v", received)
 		}
@@ -56,8 +53,8 @@ func TestHubBroadcast(t *testing.T) {
 
 func TestHubMultipleSubscriptions(t *testing.T) {
 	h := NewHub()
-	client1 := &Client{ID: "c1", Send: make(chan models.Tick, 1), Symbols: make(map[string]bool)}
-	client2 := &Client{ID: "c2", Send: make(chan models.Tick, 1), Symbols: make(map[string]bool)}
+	client1 := NewClient("c1", 1)
+	client2 := NewClient("c2", 1)
 
 	h.Register(client1)
 	h.Register(client2)
@@ -73,12 +70,12 @@ func TestHubMultipleSubscriptions(t *testing.T) {
 
 	// Both should receive AAPL
 	select {
-	case <-client1.Send:
+	case <-client1.send:
 	default:
 		t.Errorf("Client 1 did not receive AAPL")
 	}
 	select {
-	case <-client2.Send:
+	case <-client2.send:
 	default:
 		t.Errorf("Client 2 did not receive AAPL")
 	}
@@ -87,12 +84,12 @@ func TestHubMultipleSubscriptions(t *testing.T) {
 
 	// Only client 1 should receive GOOG
 	select {
-	case <-client1.Send:
+	case <-client1.send:
 	default:
 		t.Errorf("Client 1 did not receive GOOG")
 	}
 	select {
-	case <-client2.Send:
+	case <-client2.send:
 		t.Errorf("Client 2 received GOOG but was not subscribed")
 	default:
 	}

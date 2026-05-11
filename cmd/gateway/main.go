@@ -48,6 +48,7 @@ func main() {
 				return
 			case msg, ok := <-ch:
 				if !ok {
+					log.Println("Redis channel closed, listener exiting...")
 					return
 				}
 				var tick models.Tick

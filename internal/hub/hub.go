@@ -6,12 +6,30 @@ import (
 	"github.com/shreyash/fanout-gateway/internal/models"
 )
 
-// Client represents a connected WebSocket client
+// Client represents a connected WebSocket client.
+// Its fields are private to ensure thread-safe access through the Hub.
 type Client struct {
-	ID      string
-	Send    chan models.Tick
-	Symbols map[string]bool // Symbols the client is interested in
-	mu      sync.Mutex
+	id      string
+	send    chan models.Tick
+	symbols map[string]bool
+	mu      sync.RWMutex
+}
+
+// NewClient creates a new hub client
+func NewClient(id string, bufferSize int) *Client {
+	return &Client{
+		id:      id,
+		send:    make(chan models.Tick, bufferSize),
+		symbols: make(map[string]bool),
+	}
+}
+
+func (c *Client) ID() string {
+	return c.id
+}
+
+func (c *Client) Send() chan<- models.Tick {
+	return c.send
 }
 
 // Hub maintains the set of active clients and broadcasts messages
@@ -35,10 +53,12 @@ func NewHub() *Hub {
 func (h *Hub) Register(c *Client) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.clients[c.ID] = c
+	h.clients[c.id] = c
 }
 
-// Unregister removes a client from the hub and all its subscriptions
+// Unregister removes a client from the hub and all its subscriptions.
+// It does NOT close the client's send channel; that is the responsibility
+// of the component that created the client.
 func (h *Hub) Unregister(clientID string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -50,7 +70,7 @@ func (h *Hub) Unregister(clientID string) {
 
 	// Remove from all symbol subscriptions
 	client.mu.Lock()
-	for symbol := range client.Symbols {
+	for symbol := range client.symbols {
 		if subs, ok := h.subscriptions[symbol]; ok {
 			delete(subs, clientID)
 			if len(subs) == 0 {
@@ -61,7 +81,6 @@ func (h *Hub) Unregister(clientID string) {
 	client.mu.Unlock()
 
 	delete(h.clients, clientID)
-	close(client.Send)
 }
 
 // Subscribe adds a symbol to a client's interests
@@ -75,10 +94,10 @@ func (h *Hub) Subscribe(clientID string, symbol string) {
 	}
 
 	client.mu.Lock()
-	if client.Symbols == nil {
-		client.Symbols = make(map[string]bool)
+	if client.symbols == nil {
+		client.symbols = make(map[string]bool)
 	}
-	client.Symbols[symbol] = true
+	client.symbols[symbol] = true
 	client.mu.Unlock()
 
 	if _, ok := h.subscriptions[symbol]; !ok {
@@ -96,7 +115,7 @@ func (h *Hub) Broadcast(tick models.Tick) {
 		for _, client := range clients {
 			// Non-blocking send to avoid hanging the hub if a client is slow
 			select {
-			case client.Send <- tick:
+			case client.send <- tick:
 			default:
 				// Buffer full, skip or handle (e.g., disconnect slow client)
 			}
