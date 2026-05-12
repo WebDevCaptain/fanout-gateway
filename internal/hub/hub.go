@@ -2,15 +2,13 @@ package hub
 
 import (
 	"sync"
-
-	"github.com/shreyash/fanout-gateway/internal/models"
 )
 
 // Client represents a connected WebSocket client.
 // Its fields are private to ensure thread-safe access through the Hub.
 type Client struct {
 	id      string
-	send    chan models.Tick
+	send    chan []byte
 	symbols map[string]bool
 	mu      sync.RWMutex
 }
@@ -19,7 +17,7 @@ type Client struct {
 func NewClient(id string, bufferSize int) *Client {
 	return &Client{
 		id:      id,
-		send:    make(chan models.Tick, bufferSize),
+		send:    make(chan []byte, bufferSize),
 		symbols: make(map[string]bool),
 	}
 }
@@ -28,8 +26,13 @@ func (c *Client) ID() string {
 	return c.id
 }
 
-func (c *Client) Send() chan<- models.Tick {
+func (c *Client) Listen() <-chan []byte {
 	return c.send
+}
+
+// Close closes the client's send channel
+func (c *Client) Close() {
+	close(c.send)
 }
 
 // Hub maintains the set of active clients and broadcasts messages
@@ -106,16 +109,40 @@ func (h *Hub) Subscribe(clientID string, symbol string) {
 	h.subscriptions[symbol][clientID] = client
 }
 
-// Broadcast sends a tick to all clients subscribed to its symbol
-func (h *Hub) Broadcast(tick models.Tick) {
+// Unsubscribe removes a symbol from a client's interests
+func (h *Hub) Unsubscribe(clientID string, symbol string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	client, ok := h.clients[clientID]
+	if !ok {
+		return
+	}
+
+	client.mu.Lock()
+	if client.symbols != nil {
+		delete(client.symbols, symbol)
+	}
+	client.mu.Unlock()
+
+	if subs, ok := h.subscriptions[symbol]; ok {
+		delete(subs, clientID)
+		if len(subs) == 0 {
+			delete(h.subscriptions, symbol)
+		}
+	}
+}
+
+// Broadcast sends a payload to all clients subscribed to its symbol
+func (h *Hub) Broadcast(symbol string, payload []byte) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	if clients, ok := h.subscriptions[tick.Symbol]; ok {
+	if clients, ok := h.subscriptions[symbol]; ok {
 		for _, client := range clients {
 			// Non-blocking send to avoid hanging the hub if a client is slow
 			select {
-			case client.send <- tick:
+			case client.send <- payload:
 			default:
 				// Buffer full, skip or handle (e.g., disconnect slow client)
 			}

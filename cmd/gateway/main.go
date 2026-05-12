@@ -11,10 +11,14 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"github.com/shreyash/fanout-gateway/internal/hub"
-	"github.com/shreyash/fanout-gateway/internal/models"
+	"github.com/shreyash/fanout-gateway/internal/ws"
+	_ "net/http/pprof"
+	"runtime"
 )
 
 func main() {
+	runtime.SetMutexProfileFraction(1)
+	runtime.SetBlockProfileRate(1)
 	ctx := context.Background()
 
 	// Connect to Redis/Valkey
@@ -51,12 +55,17 @@ func main() {
 					log.Println("Redis channel closed, listener exiting...")
 					return
 				}
-				var tick models.Tick
-				if err := json.Unmarshal([]byte(msg.Payload), &tick); err != nil {
-					log.Printf("Error unmarshaling tick: %v", err)
+				
+				// Efficiently extract only the symbol to avoid full unmarshal
+				var meta struct {
+					Symbol string `json:"symbol"`
+				}
+				if err := json.Unmarshal([]byte(msg.Payload), &meta); err != nil {
+					log.Printf("Error unmarshaling symbol from tick: %v", err)
 					continue
 				}
-				h.Broadcast(tick)
+				
+				h.Broadcast(meta.Symbol, []byte(msg.Payload))
 			}
 		}
 	}()
@@ -74,9 +83,12 @@ func main() {
 		c.JSON(http.StatusOK, h.GetStats())
 	})
 
-	// Placeholder for WebSocket upgrade (Phase 3)
+	// pprof
+	r.GET("/debug/pprof/*any", gin.WrapH(http.DefaultServeMux))
+
+	// WebSocket endpoint
 	r.GET("/ws", func(c *gin.Context) {
-		c.JSON(http.StatusNotImplemented, gin.H{"message": "WebSocket endpoint not yet implemented"})
+		ws.ServeWS(c, h)
 	})
 
 	port := os.Getenv("PORT")
