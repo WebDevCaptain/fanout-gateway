@@ -43,5 +43,5 @@ MarketMux is a high-performance market data distribution pipeline designed for l
     - `internal/`: Private library code, including models and business logic.
     - `initial-plan.md`: The roadmap for project evolution.
 
-## Current Status: Phase 1
-The project has established the foundational data flow. The mock publisher successfully sends ticks to Redis, and the gateway can consume and log them. Next steps involve building the thread-safe `Hub` and implementing WebSocket fan-out.
+## Current Status: Phase 3
+The core fan-out pipeline is now complete. The gateway successfully upgrades HTTP connections to WebSockets, allowing clients to subscribe to specific symbols. Market data is consumed from Redis and efficiently broadcast to all subscribed WebSocket clients in real-time. Next steps involve building a frontend visualization and adding production-grade features like authentication.
