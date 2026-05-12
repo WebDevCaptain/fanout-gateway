@@ -1,6 +1,8 @@
 package hub
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 )
@@ -124,4 +126,34 @@ func TestHubUnsubscribe(t *testing.T) {
 		t.Errorf("Symbol still in client's symbols map")
 	}
 	client.mu.RUnlock()
+}
+
+func TestHubRaceCondition(t *testing.T) {
+	h := NewHub()
+	const numGoroutines = 100
+	const opsPerGoroutine = 50
+	var wg sync.WaitGroup
+
+	wg.Add(numGoroutines)
+	for i := 0; i < numGoroutines; i++ {
+		go func(id int) {
+			defer wg.Done()
+			clientID := fmt.Sprintf("client-%d", id)
+			client := NewClient(clientID, 100)
+
+			for j := 0; j < opsPerGoroutine; j++ {
+				// Mix of operations
+				h.Register(client)
+				h.Subscribe(clientID, "AAPL")
+				h.Broadcast("AAPL", []byte("test"))
+				h.Unsubscribe(clientID, "AAPL")
+				h.Unregister(clientID)
+				
+				// Some cross-symbol broadcasts
+				h.Broadcast("GOOG", []byte("test"))
+			}
+		}(i)
+	}
+
+	wg.Wait()
 }
