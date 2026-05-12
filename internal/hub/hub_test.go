@@ -3,8 +3,6 @@ package hub
 import (
 	"testing"
 	"time"
-
-	"github.com/shreyash/fanout-gateway/internal/models"
 )
 
 func TestHubRegisterUnregister(t *testing.T) {
@@ -33,18 +31,14 @@ func TestHubBroadcast(t *testing.T) {
 	h.Register(client)
 	h.Subscribe(client.ID(), "AAPL")
 
-	tick := models.Tick{
-		Symbol:    "AAPL",
-		Price:     150.0,
-		Timestamp: time.Now(),
-	}
+	payload := []byte(`{"symbol":"AAPL","price":150}`)
 
-	h.Broadcast(tick)
+	h.Broadcast("AAPL", payload)
 
 	select {
 	case received := <-client.send:
-		if received.Symbol != tick.Symbol || received.Price != tick.Price {
-			t.Errorf("Received wrong tick: %+v", received)
+		if string(received) != string(payload) {
+			t.Errorf("Received wrong payload: %s", string(received))
 		}
 	case <-time.After(100 * time.Millisecond):
 		t.Errorf("Timed out waiting for broadcast")
@@ -63,10 +57,10 @@ func TestHubMultipleSubscriptions(t *testing.T) {
 	h.Subscribe("c1", "GOOG")
 	h.Subscribe("c2", "AAPL")
 
-	tickAAPL := models.Tick{Symbol: "AAPL", Price: 150.0}
-	tickGOOG := models.Tick{Symbol: "GOOG", Price: 2800.0}
+	payloadAAPL := []byte(`{"symbol":"AAPL"}`)
+	payloadGOOG := []byte(`{"symbol":"GOOG"}`)
 
-	h.Broadcast(tickAAPL)
+	h.Broadcast("AAPL", payloadAAPL)
 
 	// Both should receive AAPL
 	select {
@@ -80,7 +74,7 @@ func TestHubMultipleSubscriptions(t *testing.T) {
 		t.Errorf("Client 2 did not receive AAPL")
 	}
 
-	h.Broadcast(tickGOOG)
+	h.Broadcast("GOOG", payloadGOOG)
 
 	// Only client 1 should receive GOOG
 	select {
@@ -93,4 +87,41 @@ func TestHubMultipleSubscriptions(t *testing.T) {
 		t.Errorf("Client 2 received GOOG but was not subscribed")
 	default:
 	}
+}
+
+func TestHubUnsubscribe(t *testing.T) {
+	h := NewHub()
+	client := NewClient("test-client", 1)
+
+	h.Register(client)
+	h.Subscribe(client.ID(), "AAPL")
+
+	// Verify subscription
+	h.mu.RLock()
+	if _, ok := h.subscriptions["AAPL"][client.ID()]; !ok {
+		t.Errorf("Client not subscribed")
+	}
+	h.mu.RUnlock()
+
+	// Unsubscribe
+	h.Unsubscribe(client.ID(), "AAPL")
+
+	// Verify unsubscription
+	h.mu.RLock()
+	if subs, ok := h.subscriptions["AAPL"]; ok {
+		if _, ok := subs[client.ID()]; ok {
+			t.Errorf("Client still subscribed after Unsubscribe")
+		}
+		if len(subs) == 0 {
+			t.Errorf("Empty subscription map should have been deleted")
+		}
+	}
+	h.mu.RUnlock()
+
+	// Check client's internal state
+	client.mu.RLock()
+	if _, ok := client.symbols["AAPL"]; ok {
+		t.Errorf("Symbol still in client's symbols map")
+	}
+	client.mu.RUnlock()
 }

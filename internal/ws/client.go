@@ -3,6 +3,7 @@ package ws
 import (
 	"fmt"
 	"log"
+	"math/rand/v2"
 	"net/http"
 	"time"
 
@@ -72,9 +73,17 @@ func (c *WSClient) readPump() {
 
 		switch msg.Action {
 		case models.ActionSubscribe:
+			if msg.Symbol == "" {
+				log.Printf("Client %s sent empty symbol for subscribe", c.hubClient.ID())
+				continue
+			}
 			log.Printf("Client %s subscribing to %s", c.hubClient.ID(), msg.Symbol)
 			c.hub.Subscribe(c.hubClient.ID(), msg.Symbol)
 		case models.ActionUnsubscribe:
+			if msg.Symbol == "" {
+				log.Printf("Client %s sent empty symbol for unsubscribe", c.hubClient.ID())
+				continue
+			}
 			log.Printf("Client %s unsubscribing from %s", c.hubClient.ID(), msg.Symbol)
 			c.hub.Unsubscribe(c.hubClient.ID(), msg.Symbol)
 		default:
@@ -97,7 +106,7 @@ func (c *WSClient) writePump() {
 
 	for {
 		select {
-		case tick, ok := <-c.hubClient.Listen():
+		case payload, ok := <-c.hubClient.Listen():
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
 				// The hub closed the channel.
@@ -105,7 +114,7 @@ func (c *WSClient) writePump() {
 				return
 			}
 
-			if err := c.conn.WriteJSON(tick); err != nil {
+			if err := c.conn.WriteMessage(websocket.TextMessage, payload); err != nil {
 				return
 			}
 
@@ -126,7 +135,7 @@ func ServeWS(ctx *gin.Context, h *hub.Hub) {
 		return
 	}
 
-	clientID := fmt.Sprintf("%s-%d", ctx.ClientIP(), time.Now().UnixNano())
+	clientID := fmt.Sprintf("%s-%d-%d", ctx.ClientIP(), time.Now().UnixNano(), rand.Uint64())
 	hubClient := hub.NewClient(clientID, 256)
 
 	client := &WSClient{
