@@ -7,10 +7,12 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"github.com/shreyash/fanout-gateway/internal/hub"
+	"github.com/shreyash/fanout-gateway/internal/models"
 	"github.com/shreyash/fanout-gateway/internal/ws"
 	_ "net/http/pprof"
 	"runtime"
@@ -81,6 +83,42 @@ func main() {
 	// Hub stats
 	r.GET("/stats", func(c *gin.Context) {
 		c.JSON(http.StatusOK, h.GetStats())
+	})
+
+	// Ingestion endpoint: Accepts ticks via HTTP and publishes them to Redis.
+	// This allows external scripts to feed data into the system.
+	r.POST("/api/v1/ticks", func(c *gin.Context) {
+		var tick models.Tick
+		if err := c.ShouldBindJSON(&tick); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Ensure we have a symbol
+		if tick.Symbol == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "symbol is required"})
+			return
+		}
+
+		// Set timestamp if not provided
+		if tick.Timestamp.IsZero() {
+			tick.Timestamp = time.Now()
+		}
+
+		payload, err := json.Marshal(tick)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to marshal tick"})
+			return
+		}
+
+		// Publish to Redis so it flows through the existing backplane
+		if err := rdb.Publish(ctx, "market.ticks", payload).Err(); err != nil {
+			log.Printf("Error publishing HTTP tick to Redis: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to publish tick"})
+			return
+		}
+
+		c.JSON(http.StatusAccepted, gin.H{"status": "published", "symbol": tick.Symbol})
 	})
 
 	// pprof
